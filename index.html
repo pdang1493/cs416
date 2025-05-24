@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>COVID-19 Narrative Visualization</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 40px; }
+    svg { width: 100%; height: 500px; }
+    .annotation { font-size: 14px; fill: #333; }
+    .tooltip { position: absolute; background: white; border: 1px solid #ccc; padding: 5px; pointer-events: none; }
+    #controls { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>COVID-19 in the United States</h1>
+  <div id="vis"></div>
+  <div id="controls">
+    <button id="nextBtn">Next</button>
+    <select id="stateDropdown" style="display: none;"></select>
+  </div>
+
+  <script>
+    let currentScene = 0;
+    let usData = [];
+    let stateData = {};
+    let selectedState = "New York";
+
+    const svg = d3.select("#vis").append("svg");
+
+    // Load NYT COVID dataset
+    d3.csv("us-states.csv", d3.autoType).then(data => {
+      data.forEach(d => d.date = new Date(d.date));
+
+      // Group by state
+      stateData = d3.group(data, d => d.state);
+
+      // Aggregate national data
+      const nested = d3.rollup(data, v => d3.sum(v, d => d.cases), d => d.date);
+      usData = Array.from(nested, ([date, cases]) => ({ date, cases }));
+
+      initDropdown();
+      renderScene();
+    });
+
+    function initDropdown() {
+      const dropdown = d3.select("#stateDropdown");
+      dropdown.selectAll("option")
+        .data(Array.from(stateData.keys()).sort())
+        .enter().append("option")
+        .text(d => d);
+
+      dropdown.on("change", function() {
+        selectedState = this.value;
+        renderScene();
+      });
+    }
+
+    function renderScene() {
+      svg.selectAll("*").remove();
+
+      if (currentScene === 0) {
+        d3.select("#stateDropdown").style("display", "none");
+        drawLineChart(usData, "U.S. Total Cases Over Time");
+      } else if (currentScene === 1) {
+        d3.select("#stateDropdown").style("display", "none");
+        const states = ["New York", "California", "Florida"];
+        drawMultiLineChart(states, "Cases Over Time: NY vs CA vs FL");
+      } else if (currentScene === 2) {
+        d3.select("#stateDropdown").style("display", "inline-block");
+        drawLineChart(stateData.get(selectedState), `COVID-19 Cases in ${selectedState}`);
+      }
+    }
+
+    function drawLineChart(data, title) {
+      const margin = {top: 50, right: 50, bottom: 50, left: 60};
+      const width = 900 - margin.left - margin.right;
+      const height = 500 - margin.top - margin.bottom;
+
+      const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+      const x = d3.scaleTime()
+        .domain(d3.extent(data, d => d.date))
+        .range([0, width]);
+
+      const y = d3.scaleLinear()
+        .domain([0, d3.max(data, d => d.cases)]).nice()
+        .range([height, 0]);
+
+      const line = d3.line()
+        .x(d => x(d.date))
+        .y(d => y(d.cases));
+
+      g.append("g").call(d3.axisLeft(y));
+      g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+
+      g.append("path")
+        .datum(data)
+        .attr("fill", "none")
+        .attr("stroke", "steelblue")
+        .attr("stroke-width", 2)
+        .attr("d", line);
+
+      svg.append("text")
+        .attr("x", width / 2 + margin.left)
+        .attr("y", 30)
+        .attr("text-anchor", "middle")
+        .style("font-size", "18px")
+        .text(title);
+    }
+
+    function drawMultiLineChart(states, title) {
+      const margin = {top: 50, right: 50, bottom: 50, left: 60};
+      const width = 900 - margin.left - margin.right;
+      const height = 500 - margin.top - margin.bottom;
+
+      const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+      const flat = states.flatMap(state => stateData.get(state));
+
+      const x = d3.scaleTime()
+        .domain(d3.extent(flat, d => d.date))
+        .range([0, width]);
+
+      const y = d3.scaleLinear()
+        .domain([0, d3.max(flat, d => d.cases)]).nice()
+        .range([height, 0]);
+
+      const color = d3.scaleOrdinal(d3.schemeCategory10).domain(states);
+
+      states.forEach(state => {
+        const data = stateData.get(state);
+        const line = d3.line()
+          .x(d => x(d.date))
+          .y(d => y(d.cases));
+
+        g.append("path")
+          .datum(data)
+          .attr("fill", "none")
+          .attr("stroke", color(state))
+          .attr("stroke-width", 2)
+          .attr("d", line);
+
+        g.append("text")
+          .attr("x", width - 60)
+          .attr("y", y(data[data.length - 1].cases))
+          .attr("fill", color(state))
+          .text(state);
+      });
+
+      g.append("g").call(d3.axisLeft(y));
+      g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+
+      svg.append("text")
+        .attr("x", width / 2 + margin.left)
+        .attr("y", 30)
+        .attr("text-anchor", "middle")
+        .style("font-size", "18px")
+        .text(title);
+    }
+
+    d3.select("#nextBtn").on("click", () => {
+      if (currentScene < 2) currentScene++;
+      renderScene();
+    });
+  </script>
+</body>
+</html>
