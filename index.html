@@ -27,15 +27,19 @@
     let selectedState = "New York";
 
     const svg = d3.select("#vis").append("svg");
+    const tooltip = d3.select("body").append("div")
+      .attr("class", "tooltip")
+      .style("display", "none")
+      .style("position", "absolute")
+      .style("background", "white")
+      .style("border", "1px solid #ccc")
+      .style("padding", "5px")
+      .style("pointer-events", "none");
 
-    // Load NYT COVID dataset
     d3.csv("us-states.csv", d3.autoType).then(data => {
       data.forEach(d => d.date = new Date(d.date));
-
-      // Group by state
       stateData = d3.group(data, d => d.state);
 
-      // Aggregate national data
       const nested = d3.rollup(data, v => d3.sum(v, d => d.cases), d => d.date);
       usData = Array.from(nested, ([date, cases]) => ({ date, cases }));
 
@@ -50,7 +54,7 @@
         .enter().append("option")
         .text(d => d);
 
-      dropdown.on("change", function() {
+      dropdown.on("change", function () {
         selectedState = this.value;
         renderScene();
       });
@@ -58,22 +62,22 @@
 
     function renderScene() {
       svg.selectAll("*").remove();
+      d3.select("#tooltip").style("display", "none");
 
       if (currentScene === 0) {
         d3.select("#stateDropdown").style("display", "none");
-        drawLineChart(usData, "U.S. Total Cases Over Time");
+        drawLineChart(usData, "U.S. Total Cases Over Time", true);
       } else if (currentScene === 1) {
         d3.select("#stateDropdown").style("display", "none");
-        const states = ["New York", "California", "Florida"];
-        drawMultiLineChart(states, "Cases Over Time: NY vs CA vs FL");
+        drawMultiLineChart(["New York", "California", "Florida"], "Cases Over Time: NY vs CA vs FL");
       } else if (currentScene === 2) {
         d3.select("#stateDropdown").style("display", "inline-block");
-        drawLineChart(stateData.get(selectedState), `COVID-19 Cases in ${selectedState}`);
+        drawLineChart(stateData.get(selectedState), `COVID-19 Cases in ${selectedState}`, false);
       }
     }
 
-    function drawLineChart(data, title) {
-      const margin = {top: 50, right: 50, bottom: 50, left: 60};
+    function drawLineChart(data, title, withAnnotation = false) {
+      const margin = { top: 60, right: 50, bottom: 60, left: 70 };
       const width = 900 - margin.left - margin.right;
       const height = 500 - margin.top - margin.bottom;
 
@@ -94,7 +98,22 @@
       g.append("g").call(d3.axisLeft(y));
       g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
 
-      g.append("path")
+      g.append("text")
+        .attr("x", -height / 2)
+        .attr("y", -50)
+        .attr("transform", "rotate(-90)")
+        .attr("text-anchor", "middle")
+        .style("font-size", "12px")
+        .text("Cumulative Cases");
+
+      g.append("text")
+        .attr("x", width / 2)
+        .attr("y", height + 40)
+        .attr("text-anchor", "middle")
+        .style("font-size", "12px")
+        .text("Date");
+
+      const path = g.append("path")
         .datum(data)
         .attr("fill", "none")
         .attr("stroke", "steelblue")
@@ -107,10 +126,42 @@
         .attr("text-anchor", "middle")
         .style("font-size", "18px")
         .text(title);
+
+      // Tooltips on mousemove
+      svg.on("mousemove", function (event) {
+        const [mx] = d3.pointer(event);
+        const date = x.invert(mx - margin.left);
+        const nearest = data.reduce((a, b) => Math.abs(b.date - date) < Math.abs(a.date - date) ? b : a);
+
+        tooltip.html(`<strong>${nearest.date.toDateString()}</strong><br/>Cases: ${nearest.cases.toLocaleString()}`)
+          .style("left", (event.pageX + 15) + "px")
+          .style("top", (event.pageY - 40) + "px")
+          .style("display", "block");
+      }).on("mouseout", () => tooltip.style("display", "none"));
+
+      // Add annotation if needed (Scene 0)
+      if (withAnnotation) {
+        const annotationDate = new Date("2022-01-15");
+        const annotatedPoint = data.find(d => d.date.getTime() === annotationDate.getTime());
+
+        if (annotatedPoint) {
+          g.append("circle")
+            .attr("cx", x(annotatedPoint.date))
+            .attr("cy", y(annotatedPoint.cases))
+            .attr("r", 5)
+            .attr("fill", "red");
+
+          g.append("text")
+            .attr("x", x(annotatedPoint.date) + 10)
+            .attr("y", y(annotatedPoint.cases) - 10)
+            .attr("class", "annotation")
+            .text("Omicron Surge (Jan 2022)");
+        }
+      }
     }
 
     function drawMultiLineChart(states, title) {
-      const margin = {top: 50, right: 50, bottom: 50, left: 60};
+      const margin = { top: 60, right: 50, bottom: 60, left: 70 };
       const width = 900 - margin.left - margin.right;
       const height = 500 - margin.top - margin.bottom;
 
@@ -127,6 +178,24 @@
 
       const color = d3.scaleOrdinal(d3.schemeCategory10).domain(states);
 
+      g.append("g").call(d3.axisLeft(y));
+      g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+
+      g.append("text")
+        .attr("x", -height / 2)
+        .attr("y", -50)
+        .attr("transform", "rotate(-90)")
+        .attr("text-anchor", "middle")
+        .style("font-size", "12px")
+        .text("Cumulative Cases");
+
+      g.append("text")
+        .attr("x", width / 2)
+        .attr("y", height + 40)
+        .attr("text-anchor", "middle")
+        .style("font-size", "12px")
+        .text("Date");
+
       states.forEach(state => {
         const data = stateData.get(state);
         const line = d3.line()
@@ -141,14 +210,11 @@
           .attr("d", line);
 
         g.append("text")
-          .attr("x", width - 60)
+          .attr("x", x(data[data.length - 1].date) - 40)
           .attr("y", y(data[data.length - 1].cases))
           .attr("fill", color(state))
           .text(state);
       });
-
-      g.append("g").call(d3.axisLeft(y));
-      g.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
 
       svg.append("text")
         .attr("x", width / 2 + margin.left)
@@ -163,5 +229,6 @@
       renderScene();
     });
   </script>
+
 </body>
 </html>
